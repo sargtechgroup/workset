@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a2a">
+    <meta name="description" content="Field operations tracking for pipeline inspection, cleaning and gauging teams.">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css?v=43">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <title>Fieldwork — Operations dashboard</title>
+  </head>
+  <body>
+    <div id="login-screen" class="login-screen">
+      <div class="login-card">
+        <div class="brand-mark">F</div>
+        <p class="eyebrow">FIELD OPERATIONS</p>
+        <h1>Good work starts<br>with a clear plan.</h1>
+        <p class="muted">Sign in to your team's shared operations workspace.</p>
+        <form id="login-form">
+          <div id="signup-name-field" class="auth-field hidden">
+            <label for="login-name">Your name</label>
+            <input id="login-name" name="name" autocomplete="name" placeholder="Your full name">
+          </div>
+          <div id="signup-phone-field" class="auth-field hidden">
+            <label for="signup-phone">Phone</label>
+            <input id="signup-phone" name="phone" type="tel" autocomplete="tel" placeholder="Work or mobile number">
+          </div>
+          <div id="signup-title-field" class="auth-field hidden">
+            <label for="signup-title">Job title</label>
+            <input id="signup-title" name="jobTitle" autocomplete="organization-title" placeholder="e.g. Field technician">
+          </div>
+          <div id="signup-account-type-field" class="auth-field hidden">
+            <label for="signup-account-type">Account type</label>
+            <select id="signup-account-type" name="accountType" class="form-input">
+              <option value="internal">Fieldwork team</option>
+              <option value="contractor">Contractor company</option>
+            </select>
+          </div>
+          <p id="signup-invite-note" class="auth-message hidden">Employee invitation detected. Request contractor access with the invited email address.</p>
+          <div id="signup-company-field" class="auth-field hidden">
+            <label for="signup-company">Contractor company</label>
+            <input id="signup-company" name="companyName" autocomplete="organization" placeholder="Registered company name">
+          </div>
+          <div id="signup-company-gst-field" class="auth-field hidden">
+            <label for="signup-company-gst">GST / tax registration number</label>
+            <input id="signup-company-gst" name="companyGstNumber" autocomplete="off" placeholder="GST, VAT, or business tax number">
+          </div>
+          <div id="signup-company-phone-field" class="auth-field hidden">
+            <label for="signup-company-phone">Company phone</label>
+            <input id="signup-company-phone" name="companyPhone" type="tel" autocomplete="tel">
+          </div>
+          <div id="signup-company-address-field" class="auth-field hidden">
+            <label for="signup-company-address">Business address</label>
+            <textarea id="signup-company-address" class="form-textarea" name="companyAddress" autocomplete="street-address" rows="2"></textarea>
+          </div>
+          <label for="login-email">Work email</label>
+          <input id="login-email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required>
+          <label for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" minlength="8" placeholder="At least 8 characters" required>
+          <p id="auth-message" class="auth-message" role="status" aria-live="polite"></p>
+          <button id="auth-submit" class="button button-primary button-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+        <button id="auth-mode-toggle" class="auth-mode-toggle" type="button">Need an account? Request access</button>
+        <p class="login-note">Shared data · encrypted in transit · role-based access</p>
+      </div>
+      <div class="login-aside">
+        <div class="aside-content">
+          <span class="live-pill"><span></span> OPERATIONS OVERVIEW</span>
+          <h2>Every crew.<br>Every tool.<br>One clear view.</h2>
+          <p>Keep jobs moving, teams aligned, and field records in one place.</p>
+          <div class="aside-stats"><div><strong>01</strong><span>Plan the day</span></div><div><strong>02</strong><span>Equip the crew</span></div><div><strong>03</strong><span>Track the run</span></div></div>
+        </div>
+        <div class="aside-foot">BUILT FOR THE FIELD <span>·</span> DESIGNED FOR THE CREW</div>
+      </div>
+    </div>
+
+    <div id="app" class="app-shell hidden">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#" data-page="overview"><span class="brand-mark">F</span><span>fieldwork<small>OPERATIONS</small></span></a>
+        <div class="workspace-label">WORKSPACE</div>
+        <nav class="main-nav" aria-label="Main navigation">
+          <button class="nav-link active" data-page="overview"><span class="nav-icon">◫</span>Overview</button>
+          <button class="nav-link" data-page="foreman"><span class="nav-icon">♟</span>Foreman dashboard</button>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-planning"><span class="nav-icon">▦</span><span>Planning</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-planning">
+              <button class="nav-link" data-page="jobs"><span class="nav-icon">▦</span>Jobs & calendar</button>
+              <button class="nav-link" data-page="tasks"><span class="nav-icon">☷</span>Daily tasks <span id="task-nav-count" class="nav-count"></span></button>
+            </div>
+          </section>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-operations"><span class="nav-icon">◎</span><span>Field operations</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-operations">
+              <button class="nav-link" data-page="runs"><span class="nav-icon">◎</span>Tool runs</button>
+              <button class="nav-link" data-page="tracking-tools"><span class="nav-icon">⌖</span>Tracking Tools</button>
+              <button class="nav-link" data-page="gps-workspace"><span class="nav-icon">⌖</span>GPS workspace</button>
+              <button class="nav-link" data-page="people"><span class="nav-icon">♙</span>People & equipment</button>
+            </div>
+          </section>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-contractors"><span class="nav-icon">▤</span><span>Contractors</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-contractors">
+              <button class="nav-link" data-page="invoices"><span class="nav-icon">▤</span>Invoices</button>
+              <button class="nav-link" data-page="contractor-work"><span class="nav-icon">◷</span>Hours & equipment</button>
+            </div>
+          </section>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-safety"><span class="nav-icon">◇</span><span>Safety & reports</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-safety">
+              <button class="nav-link" data-page="safety"><span class="nav-icon">◇</span>Safety & JSA</button>
+              <button class="nav-link" data-page="safety-library"><span class="nav-icon">▤</span>Safety library</button>
+              <button class="nav-link" data-page="safety-tickets"><span class="nav-icon">◇</span>Safety tickets</button>
+              <button class="nav-link" data-page="reports"><span class="nav-icon">▤</span>Daily reports</button>
+            </div>
+          </section>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-insights"><span class="nav-icon">▥</span><span>Insights</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-insights">
+              <button class="nav-link" data-page="analytics"><span class="nav-icon">▥</span>Analytics</button>
+            </div>
+          </section>
+          <section class="nav-group">
+            <button class="nav-group-toggle" type="button" aria-expanded="false" aria-controls="nav-account"><span class="nav-icon">♙</span><span>My account</span><span class="nav-group-chevron" aria-hidden="true">⌄</span></button>
+            <div class="nav-group-items hidden" id="nav-account">
+              <button class="nav-link" data-page="profile"><span class="nav-icon">♙</span>My profile</button>
+              <button id="users-nav-link" class="nav-link hidden" data-page="users"><span class="nav-icon">⚙</span>Admin panel</button>
+            </div>
+          </section>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="help-card"><span class="help-icon">?</span><strong>Need a hand?</strong><p>Your field guide to getting started.</p><button data-action="help">View quick guide <span>↗</span></button></div>
+          <button class="profile-button" id="profile-button"><span class="avatar" id="user-avatar">A</span><span class="profile-copy"><strong id="user-name">User</strong><small id="user-role">Workspace member</small></span><span class="profile-menu">···</span></button>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobile-menu" aria-label="Open navigation">☰</button>
+          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="page-title">Overview</strong></div>
+          <div class="topbar-right"><span id="sync-status" class="sync-status" role="status"><i></i><span>Connecting</span></span><span class="today-label" id="today-label"></span><button class="icon-button notification-button" aria-label="Notifications">♧<i></i></button><span class="avatar top-avatar" id="top-avatar">U</span><button id="logout-button" class="button button-outline" data-action="logout" type="button">Sign out</button></div>
+        </header>
+        <section id="page-content" class="page-content" tabindex="-1"></section>
+      </main>
+      <button id="assistant-toggle" class="assistant-toggle" type="button" aria-label="Open Fieldwork assistant" aria-expanded="false">
+        <span aria-hidden="true">✦</span><span class="assistant-toggle-label">Ask Fieldwork</span>
+      </button>
+      <section id="assistant-panel" class="assistant-panel hidden" aria-label="Fieldwork assistant" aria-hidden="true">
+        <header class="assistant-header">
+          <div class="assistant-heading"><span class="assistant-avatar">✦</span><div><strong>Fieldwork assistant</strong><small><span></span> Demo · uses workspace data</small></div></div>
+          <button id="assistant-close" class="modal-close" type="button" aria-label="Close assistant">×</button>
+        </header>
+        <div id="assistant-messages" class="assistant-messages" aria-live="polite"></div>
+        <div class="assistant-suggestions" id="assistant-suggestions">
+          <button type="button" data-assistant-prompt="What's on today's schedule?">Today's schedule</button>
+          <button type="button" data-assistant-prompt="What's missing before work starts?">Missing items</button>
+          <button type="button" data-assistant-prompt="Which safety forms need review?">Safety reviews</button>
+          <button type="button" data-assistant-prompt="Which safety tickets are expiring?">Ticket expiry</button>
+          <button type="button" data-assistant-prompt="What equipment is available?">Available equipment</button>
+        </div>
+        <form id="assistant-form" class="assistant-form">
+          <label class="sr-only" for="assistant-input">Ask Fieldwork a question</label>
+          <input id="assistant-input" name="message" autocomplete="off" placeholder="Ask about your field work..." required>
+          <button type="submit" aria-label="Send message">↑</button>
+        </form>
+        <p class="assistant-disclaimer">Demo assistant · not connected to an AI model</p>
+      </section>
+    </div>
+
+    <dialog id="modal" class="modal"><div id="modal-content"></div></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script src="supabase-config.js"></script>
+    <script src="gps-calculations.js"></script>
+    <script src="gps-workspace.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
