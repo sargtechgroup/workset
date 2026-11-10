@@ -169,6 +169,8 @@ let gpsWorkspaceUnmount = null;
 let foremanJobId = "";
 let safetyFormDraft = null;
 let safetyLibraryFolderId = "";
+let personalWorkspaceData = { userId: "", workspaces: [], modules: [], selectedId: "", editModuleId: "", loaded: false, error: "" };
+let personalWorkspaceRequest = 0;
 let signaturePad = null;
 let printingSafetyRecordId = "";
 let calendarDate = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -1720,6 +1722,8 @@ async function initializeSupabase() {
       adminContractorJobEquipment = [];
       adminContractorInvoices = [];
       foremanProfilesCache = [];
+      personalWorkspaceRequest += 1;
+      personalWorkspaceData = { userId: "", workspaces: [], modules: [], selectedId: "", editModuleId: "", loaded: false, error: "" };
       workspaceDirty = false;
       if (workspaceChannel) supabaseClient.removeChannel(workspaceChannel);
       if (contractorAccessChannel) supabaseClient.removeChannel(contractorAccessChannel);
@@ -2205,17 +2209,21 @@ function expandNavGroupForPage(page) {
 }
 
 function setPage(page) {
-  if (userProfile?.role === "contractor" && !["contractor-home", "profile", "safety-tickets"].includes(page)) page = "contractor-home";
-  if (userProfile?.role === "foreman" && !["foreman", "profile", "safety-library"].includes(page)) page = "foreman";
+  if (userProfile?.role === "contractor" && !["contractor-home", "profile", "safety-tickets", "my-workspaces"].includes(page)) page = "contractor-home";
+  if (userProfile?.role === "foreman" && !["foreman", "profile", "safety-library", "my-workspaces"].includes(page)) page = "foreman";
   if (page === "users" && userProfile?.role !== "admin") page = "overview";
   activePage = page;
+  if (page === "my-workspaces" && personalWorkspaceData.userId !== authSession?.user?.id) {
+    personalWorkspaceData = { userId: authSession?.user?.id || "", workspaces: [], modules: [], selectedId: "", editModuleId: "", loaded: false, error: "" };
+  }
   document.querySelectorAll(".nav-link").forEach((item) => item.classList.toggle("active", item.dataset.page === page));
   expandNavGroupForPage(page);
   if (page === "gps-workspace" && !gpsWorkspaceJobId) gpsWorkspaceJobId = state.jobs[0]?.id || "";
-  const names = { overview: "Overview", foreman: "Foreman dashboard", analytics: "Analytics", users: "Admin panel", profile: "My profile", "safety-tickets": "Safety tickets", "contractor-home": "Contractor portal", jobs: "Jobs & calendar", tasks: "Daily tasks", runs: "Tool runs", "tracking-tools": "Tracking Tools", "gps-workspace": "GPS workspace", people: "People & equipment", invoices: "Contractors & invoices", "contractor-work": "Contractor hours & equipment", safety: "Safety & JSA", "safety-library": "Safety library", "safety-fill": "Safety form", reports: "Daily reports" };
+  const names = { overview: "Overview", foreman: "Foreman dashboard", analytics: "Analytics", users: "Admin panel", profile: "My profile", "my-workspaces": "My workspaces", "safety-tickets": "Safety tickets", "contractor-home": "Contractor portal", jobs: "Jobs & calendar", tasks: "Daily tasks", runs: "Tool runs", "tracking-tools": "Tracking Tools", "gps-workspace": "GPS workspace", people: "People & equipment", invoices: "Contractors & invoices", "contractor-work": "Contractor hours & equipment", safety: "Safety & JSA", "safety-library": "Safety library", "safety-fill": "Safety form", reports: "Daily reports" };
   document.getElementById("page-title").textContent = names[page] || "Overview";
   document.getElementById("sidebar").classList.remove("open");
   renderPage();
+  if (page === "my-workspaces") void loadPersonalWorkspaces();
   if (page === "users") loadAdminProfiles();
   if (page === "contractor-work") loadAdminContractorWorkflow();
   if (page === "foreman") {
@@ -2235,13 +2243,13 @@ function renderPage() {
     unmount();
   }
   if (userProfile?.role === "contractor") {
-    const contractorPages = { "contractor-home": renderContractorPortal, profile: renderMyProfile, "safety-tickets": renderSafetyTickets };
+    const contractorPages = { "contractor-home": renderContractorPortal, profile: renderMyProfile, "safety-tickets": renderSafetyTickets, "my-workspaces": renderPersonalWorkspaces };
     document.getElementById("page-content").innerHTML = (contractorPages[activePage] || renderContractorPortal)();
-    document.getElementById("page-title").textContent = activePage === "profile" ? "My profile" : activePage === "safety-tickets" ? "Safety tickets" : "Contractor portal";
+    document.getElementById("page-title").textContent = activePage === "profile" ? "My profile" : activePage === "safety-tickets" ? "Safety tickets" : activePage === "my-workspaces" ? "My workspaces" : "Contractor portal";
     if (activePage === "profile" || activePage === "safety-tickets") hydratePrivatePhotos();
     return;
   }
-  const pages = { overview: renderOverview, foreman: renderForemanDashboard, analytics: renderAnalytics, users: renderUsers, profile: renderMyProfile, "safety-tickets": renderSafetyTickets, jobs: renderJobs, tasks: renderTasks, runs: renderRuns, "tracking-tools": renderTrackingTools, "gps-workspace": renderGpsWorkspace, people: renderPeople, invoices: renderInvoices, "contractor-work": renderContractorWork, safety: renderSafety, "safety-library": renderSafetyLibrary, "safety-fill": renderSafetyFill, reports: renderReports };
+  const pages = { overview: renderOverview, foreman: renderForemanDashboard, analytics: renderAnalytics, users: renderUsers, profile: renderMyProfile, "my-workspaces": renderPersonalWorkspaces, "safety-tickets": renderSafetyTickets, jobs: renderJobs, tasks: renderTasks, runs: renderRuns, "tracking-tools": renderTrackingTools, "gps-workspace": renderGpsWorkspace, people: renderPeople, invoices: renderInvoices, "contractor-work": renderContractorWork, safety: renderSafety, "safety-library": renderSafetyLibrary, "safety-fill": renderSafetyFill, reports: renderReports };
   pageContent.innerHTML = (pages[activePage] || renderOverview)();
   document.body.classList.toggle("safety-fill-active", activePage === "safety-fill");
   if (activePage === "safety-fill") mountSafetySignaturePad();
@@ -2261,6 +2269,171 @@ function renderPage() {
   }
   document.getElementById("task-nav-count").textContent = state.tasks.filter((task) => !task.done).length || "";
   if (activePage === "profile" || activePage === "safety-tickets") hydratePrivatePhotos();
+}
+
+const WORKSPACE_PAGES = [
+  ["overview", "Overview"], ["foreman", "Foreman dashboard"], ["jobs", "Jobs & calendar"],
+  ["tasks", "Daily tasks"], ["runs", "Tool runs"], ["tracking-tools", "Tracking Tools"],
+  ["gps-workspace", "GPS workspace"], ["people", "People & equipment"],
+  ["invoices", "Invoices"], ["contractor-work", "Hours & equipment"],
+  ["safety", "Safety & JSA"], ["safety-library", "Safety library"],
+  ["safety-tickets", "Safety tickets"], ["reports", "Daily reports"],
+  ["analytics", "Analytics"], ["profile", "My profile"], ["users", "Admin panel"],
+  ["contractor-home", "Contractor portal"],
+];
+
+function availableWorkspacePages() {
+  const role = userProfile?.role;
+  return WORKSPACE_PAGES.filter(([id]) => {
+    if (role === "contractor") return ["contractor-home", "profile", "safety-tickets"].includes(id);
+    if (role === "foreman") return ["foreman", "profile", "safety-library"].includes(id);
+    if (role !== "admin" && role !== "manager") return false;
+    return id !== "contractor-home" && (id !== "users" || role === "admin");
+  });
+}
+
+async function loadPersonalWorkspaces() {
+  const userId = authSession?.user?.id;
+  if (!supabaseClient || !userId) return;
+  const request = ++personalWorkspaceRequest;
+  try {
+    const [workspaces, modules] = await Promise.all([
+      supabaseClient.from("personal_workspaces").select("id,name,pages,module_ids").eq("user_id", userId).order("created_at"),
+      supabaseClient.from("shared_workspace_modules").select("id,name,description,pages,created_by").order("created_at"),
+    ]);
+    if (workspaces.error || modules.error) throw workspaces.error || modules.error;
+    if (request !== personalWorkspaceRequest || authSession?.user?.id !== userId) return;
+    personalWorkspaceData.userId = userId;
+    personalWorkspaceData.workspaces = workspaces.data || [];
+    personalWorkspaceData.modules = modules.data || [];
+    personalWorkspaceData.loaded = true;
+    personalWorkspaceData.error = "";
+    if (personalWorkspaceData.selectedId && !personalWorkspaceData.workspaces.some((item) => item.id === personalWorkspaceData.selectedId)) personalWorkspaceData.selectedId = "";
+    if (activePage === "my-workspaces") renderPage();
+  } catch (error) {
+    if (request !== personalWorkspaceRequest || authSession?.user?.id !== userId) return;
+    console.error("Could not load modular workspaces.", error);
+    personalWorkspaceData.loaded = false;
+    personalWorkspaceData.error = "Could not load workspaces. Check your connection and apply the modular workspace SQL migration.";
+    if (activePage === "my-workspaces") renderPage();
+  }
+}
+
+function renderPersonalWorkspaces() {
+  const header = heading("PERSONAL DASHBOARD", "My workspaces", "Create personal layouts and shared shortcut modules for your work. Existing page permissions still apply.", userProfile?.role === "contractor" ? `<button type="button" class="button button-outline" data-page="contractor-home">Back to contractor portal</button>` : "");
+  if (!personalWorkspaceData.loaded) return `${header}<section class="card panel"><div class="empty-state"><strong>${personalWorkspaceData.error ? "Workspaces unavailable" : "Loading workspaces"}</strong>${escapeHtml(personalWorkspaceData.error || "Loading your layouts and shared modules.")}</div>${personalWorkspaceData.error ? `<button type="button" class="button button-outline" data-workspace-reload>Retry</button>` : ""}</section>`;
+  const availablePages = availableWorkspacePages();
+  const allowed = new Set(availablePages.map(([id]) => id));
+  const selected = personalWorkspaceData.workspaces.find((item) => item.id === personalWorkspaceData.selectedId);
+  const selectedPages = selected?.pages || [];
+  const selectedModules = selected?.module_ids || [];
+  const moduleBeingEdited = personalWorkspaceData.modules.find((item) => item.id === personalWorkspaceData.editModuleId);
+  const pageChoices = (name, checked) => availablePages.map(([id, label]) => `<label class="workspace-choice"><input type="checkbox" name="${name}" value="${escapeHtml(id)}" ${checked.includes(id) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("");
+  const workspaceOptions = personalWorkspaceData.workspaces.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selected?.id ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("");
+  const shortcutCards = selected
+    ? [...availablePages.filter(([id]) => selectedPages.includes(id)).map(([id, label]) => `<article class="card workspace-shortcut"><strong>${escapeHtml(label)}</strong><button type="button" class="button button-outline" data-page="${escapeHtml(id)}">Open</button></article>`),
+      ...personalWorkspaceData.modules.filter((item) => selectedModules.includes(item.id)).map((item) => {
+        const links = availablePages.filter(([id]) => (item.pages || []).includes(id));
+        return `<article class="card workspace-shortcut"><strong>${escapeHtml(item.name)}</strong><p>${escapeHtml(item.description || "Shared module")}</p>${links.length ? `<div class="workspace-shortcut-links">${links.map(([id, label]) => `<button type="button" class="button button-outline" data-page="${escapeHtml(id)}">${escapeHtml(label)}</button>`).join("")}</div>` : `<p>No links available for your role.</p>`}</article>`;
+      })].join("")
+    : "";
+  const moduleChoices = personalWorkspaceData.modules.map((item) => `<label class="workspace-choice"><input type="checkbox" name="moduleIds" value="${escapeHtml(item.id)}" ${selectedModules.includes(item.id) ? "checked" : ""}><span>${escapeHtml(item.name)}</span></label>`).join("");
+  const moduleList = personalWorkspaceData.modules.map((item) => `<div class="workspace-module-row"><div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.description || "Shared shortcut module")} · ${(item.pages || []).filter((id) => allowed.has(id)).length} accessible link(s)</span></div>${item.created_by === authSession?.user?.id || userProfile?.role === "admin" ? `<div><button type="button" class="text-link" data-workspace-module-edit="${escapeHtml(item.id)}">Edit</button> <button type="button" class="text-link foreman-danger-link" data-workspace-module-delete="${escapeHtml(item.id)}">Delete</button></div>` : ""}</div>`).join("");
+  return `${header}
+    <section class="card panel workspace-panel"><div class="panel-head"><div><h2 class="panel-title">Your layouts</h2><p class="panel-subtitle">Layouts are private to your account. Choose a saved layout or create a new one.</p></div><button type="button" class="button button-outline" data-workspace-new>New workspace</button></div>
+      <label class="workspace-field">Workspace<select class="form-input" id="personal-workspace-select"><option value="">New workspace</option>${workspaceOptions}</select></label>
+      ${selected ? `<div class="workspace-shortcut-grid">${shortcutCards || `<div class="empty-state">No shortcuts selected yet.</div>`}</div>` : ""}
+      <form id="personal-workspace-form" data-workspace-id="${escapeHtml(selected?.id || "")}" class="workspace-editor">
+        <label class="workspace-field">Workspace name<input class="form-input" name="name" maxlength="80" required value="${escapeHtml(selected?.name || "")}" placeholder="e.g. Tracking digs"></label>
+        <strong>Existing Fieldwork pages</strong><div class="workspace-choice-grid">${pageChoices("pages", selectedPages)}</div>
+        <strong>Shared custom modules</strong><div class="workspace-choice-grid">${moduleChoices || `<span class="form-hint">No custom modules yet. Create one below.</span>`}</div>
+        <div class="workspace-actions"><button type="submit" class="button button-primary">${selected ? "Save workspace" : "Create workspace"}</button>${selected ? `<button type="button" class="text-link foreman-danger-link" data-workspace-delete="${escapeHtml(selected.id)}">Delete workspace</button>` : ""}</div>
+      </form></section>
+    <section class="card panel workspace-panel"><div class="panel-head"><div><h2 class="panel-title">Shared custom modules</h2><p class="panel-subtitle">All approved users can see these modules. Their links only open pages allowed by each user's role.</p></div></div>
+      <div class="workspace-module-list">${moduleList || `<p class="form-hint">No shared modules yet.</p>`}</div>
+      <form id="shared-module-form" data-module-id="${escapeHtml(moduleBeingEdited?.id || "")}" class="workspace-editor">
+        <strong>${moduleBeingEdited ? "Edit shared module" : "Create a shared module"}</strong>
+        <label class="workspace-field">Module name<input class="form-input" name="name" maxlength="80" required value="${escapeHtml(moduleBeingEdited?.name || "")}" placeholder="e.g. ILI support"></label>
+        <label class="workspace-field">Description (optional)<input class="form-input" name="description" maxlength="240" value="${escapeHtml(moduleBeingEdited?.description || "")}"></label>
+        <strong>Pages to include</strong><div class="workspace-choice-grid">${pageChoices("pages", moduleBeingEdited?.pages || [])}</div>
+        <div class="workspace-actions"><button type="submit" class="button button-primary">${moduleBeingEdited ? "Save module" : "Create shared module"}</button>${moduleBeingEdited ? `<button type="button" class="button button-outline" data-workspace-module-cancel>Cancel</button>` : ""}</div>
+      </form></section>`;
+}
+
+async function savePersonalWorkspace(form) {
+  const data = new FormData(form);
+  const name = String(data.get("name") || "").trim();
+  if (!name) { showToast("Enter a workspace name."); return; }
+  const id = form.dataset.workspaceId;
+  const previous = personalWorkspaceData.workspaces.find((item) => item.id === id);
+  if (id && !previous) { showToast("That workspace is no longer available."); return; }
+  const allowed = new Set(availableWorkspacePages().map(([page]) => page));
+  const pages = [...new Set([...data.getAll("pages").filter((page) => allowed.has(page)), ...(previous?.pages || []).filter((page) => !allowed.has(page))])];
+  const moduleIds = [...new Set(data.getAll("moduleIds").filter((moduleId) => personalWorkspaceData.modules.some((item) => item.id === moduleId)))];
+  const payload = { name, pages, module_ids: moduleIds };
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const query = id
+      ? supabaseClient.from("personal_workspaces").update(payload).eq("id", id).eq("user_id", authSession.user.id)
+      : supabaseClient.from("personal_workspaces").insert({ ...payload, user_id: authSession.user.id });
+    const { data: saved, error } = await query.select("id").single();
+    if (error) throw error;
+    personalWorkspaceData.selectedId = saved.id;
+    await loadPersonalWorkspaces();
+    showToast("Workspace saved.");
+  } catch (error) {
+    console.error("Could not save personal workspace.", error);
+    showToast("Could not save this workspace. Check your connection and try again.");
+  } finally { button.disabled = false; }
+}
+
+async function saveSharedWorkspaceModule(form) {
+  const data = new FormData(form);
+  const name = String(data.get("name") || "").trim();
+  const id = form.dataset.moduleId;
+  const previous = personalWorkspaceData.modules.find((item) => item.id === id);
+  if (!name) { showToast("Enter a module name."); return; }
+  if (id && (!previous || (previous.created_by !== authSession?.user?.id && userProfile?.role !== "admin"))) { showToast("You cannot edit this module."); return; }
+  const allowed = new Set(availableWorkspacePages().map(([page]) => page));
+  const pages = [...new Set([...data.getAll("pages").filter((page) => allowed.has(page)), ...(previous?.pages || []).filter((page) => !allowed.has(page))])];
+  if (!pages.length) { showToast("Choose at least one page for the module."); return; }
+  const payload = { name, description: String(data.get("description") || "").trim(), pages };
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const query = id
+      ? supabaseClient.from("shared_workspace_modules").update(payload).eq("id", id)
+      : supabaseClient.from("shared_workspace_modules").insert({ ...payload, created_by: authSession.user.id });
+    const { error } = await query.select("id").single();
+    if (error) throw error;
+    personalWorkspaceData.editModuleId = "";
+    await loadPersonalWorkspaces();
+    showToast("Shared module saved.");
+  } catch (error) {
+    console.error("Could not save shared workspace module.", error);
+    showToast("Could not save this module. Check your connection and try again.");
+  } finally { button.disabled = false; }
+}
+
+async function deletePersonalWorkspaceItem(table, id) {
+  const isModule = table === "shared_workspace_modules";
+  const item = (isModule ? personalWorkspaceData.modules : personalWorkspaceData.workspaces).find((entry) => entry.id === id);
+  if (!item) { showToast("That item is no longer available."); return; }
+  if (isModule && item.created_by !== authSession?.user?.id && userProfile?.role !== "admin") { showToast("Only its creator or an admin can delete this module."); return; }
+  if (!confirm(isModule ? `Delete the shared module “${item.name}” for everyone?` : `Delete your workspace “${item.name}”?`)) return;
+  try {
+    const { data, error } = await supabaseClient.from(table).delete().eq("id", id).select("id").maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("The item could not be deleted or is no longer available.");
+    if (isModule && personalWorkspaceData.editModuleId === id) personalWorkspaceData.editModuleId = "";
+    if (!isModule && personalWorkspaceData.selectedId === id) personalWorkspaceData.selectedId = "";
+    await loadPersonalWorkspaces();
+    showToast(isModule ? "Shared module deleted." : "Workspace deleted.");
+  } catch (error) {
+    console.error("Could not delete workspace item.", error);
+    showToast("Could not delete this item. Check your access and try again.");
+  }
 }
 
 function renderOverview() {
@@ -2294,7 +2467,7 @@ function renderOverview() {
       </section>
     </div>
     <section class="card panel" style="margin-top:15px"><div class="panel-head"><div><h2 class="panel-title">Active jobs</h2><p class="panel-subtitle">Progress across current field work</p></div><button class="text-link" data-page="jobs">All jobs →</button></div>
-      <div class="job-list">${state.jobs.slice(0, 3).map((job) => `<div class="job-card"><div class="job-symbol">⌖</div><div class="job-info"><strong>${escapeHtml(job.name)}</strong><p>${escapeHtml(job.client)} · ${escapeHtml(job.location)}</p></div><div class="job-meta">${formatDate(job.date)}</div><div class="job-right">${statusPill(job.status)}<div class="progress-wrap"><div class="progress-label"><span>Progress</span><span>${job.progress}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, Number(job.progress) || 0))}%"></div></div></div></div></div>`).join("") || `<div class="empty-state"><strong>No jobs yet</strong>Add a job to organize your field work.</div>`}</div>
+      <div class="job-list">${state.jobs.slice(0, 3).map((job) => `<div class="job-card"><div class="job-symbol">⌖</div><div class="job-info"><strong>${escapeHtml(job.name)}</strong><p>${escapeHtml(job.client)} · ${escapeHtml(job.location)}</p></div><div class="job-meta">${formatDate(job.date)}</div><div class="job-right">${statusPill(job.status)}${renderJobSafetySummary(job)}<div class="progress-wrap"><div class="progress-label"><span>Progress</span><span>${job.progress}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, Number(job.progress) || 0))}%"></div></div></div></div></div>`).join("") || `<div class="empty-state"><strong>No jobs yet</strong>Add a job to organize your field work.</div>`}</div>
     </section>`;
 }
 
@@ -2816,6 +2989,26 @@ function renderJobs() {
     <section class="card panel" style="margin-top:15px"><div class="panel-head"><div><h2 class="panel-title">All jobs</h2><p class="panel-subtitle">${state.jobs.length} jobs in your workspace</p></div></div>${renderJobList()}</section>`;
 }
 
+function renderJobSafetySummary(job) {
+  const templates = (state.safetyTemplates || []).filter((template) => template.jobId === job.id);
+  const documents = (state.safetyLibrary || []).filter((document) => document.jobId === job.id);
+  const completed = state.safety
+    .filter((form) => form.jobId === job.id && form.status === "Current")
+    .slice()
+    .sort((first, second) => String(second.workDate || second.updated || "").localeCompare(String(first.workDate || first.updated || "")));
+  const assignedCount = templates.length + documents.length;
+  const assigned = [
+    ...templates.map((template) => `<li><span>${escapeHtml(template.name)} <small>Form</small></span><button type="button" class="text-link" data-fill-template="${escapeHtml(template.id)}" data-job-id="${escapeHtml(job.id)}">Fill out</button></li>`),
+    ...documents.map((document) => `<li><span>${escapeHtml(document.title)} <small>${escapeHtml(document.category || "PDF")}</small></span><button type="button" class="text-link" data-safety-library-view="${escapeHtml(document.id)}">View PDF</button></li>`),
+  ].join("");
+  const completedItems = completed.map((form) => `<li><span>${escapeHtml(form.title)} <small>${form.workDate ? formatDate(form.workDate, { month: "short", day: "numeric", year: "numeric" }) : form.updated ? `Updated ${formatDate(form.updated, { month: "short", day: "numeric", year: "numeric" })}` : "Current"}</small></span><button type="button" class="text-link" data-safety-form="${escapeHtml(form.id)}">Review</button><button type="button" class="text-link" data-print-safety-record="${escapeHtml(form.id)}">Print</button></li>`).join("");
+  return `<details class="job-safety-summary"><summary>Safety: ${assignedCount} assigned · ${completed.length} current</summary>
+    <div class="job-safety-summary-content">
+      <strong>Assigned forms &amp; PDFs</strong>${assigned ? `<ul>${assigned}</ul>` : `<p>No forms or PDFs specifically assigned to this job.</p>`}
+      <strong>Current safety records</strong>${completedItems ? `<ul>${completedItems}</ul>` : `<p>No current FLHA, tailgate, JSA, or other safety records.</p>`}
+    </div></details>`;
+}
+
 function renderJobList() {
   if (!state.jobs.length) return `<div class="empty-state"><strong>No jobs yet</strong>Create a job to get started.</div>`;
   const scopeLabels = {
@@ -2836,7 +3029,7 @@ function renderJobList() {
     const dailyPlanDetails = dailyPlan.length
       ? `<details class="daily-job-plan-details"><summary>Daily work plan · ${dailyPlan.length} days</summary><div class="daily-job-plan-summary">${dailyPlan.map((day) => `<section><strong>${formatDate(day.date, { weekday: "short", month: "short", day: "numeric" })} · ${escapeHtml(day.assignee || "Unassigned")}</strong><ul>${(Array.isArray(day.tasks) ? day.tasks : [day.tasks]).map((task) => `<li>${escapeHtml(task)}</li>`).join("")}</ul></section>`).join("")}</div></details>`
       : "";
-    return `<div class="job-card"><div class="job-symbol">⌖</div><div class="job-info"><strong>${escapeHtml(job.name)}</strong><p>${escapeHtml(job.client)} · ${escapeHtml(job.location)}${job.companyName ? ` · ${escapeHtml(job.companyName)}` : ""} · Foreman: ${escapeHtml(jobForemanName(job) || "Unassigned")}${assignedCrew.length ? ` · Crew: ${assignedCrew.map(escapeHtml).join(", ")}` : ""}</p>${scopeDetails}${dailyPlanDetails}<div class="job-card-actions"><button class="button button-outline scope-edit-button" data-scope-job="${escapeHtml(job.id)}">${hasScope ? "Edit scope of work" : "Create scope of work"}</button><button class="button button-outline" data-action="assign-foreman" data-job-id="${escapeHtml(job.id)}">${job.foremanUserId ? "Reassign foreman" : "Assign foreman"}</button><button class="button button-primary" data-action="open-gps-workspace" data-job-id="${escapeHtml(job.id)}">GPS workspace</button></div></div><div class="job-meta">${formatDate(job.startDate || job.date)}${job.endDate && job.endDate !== (job.startDate || job.date) ? ` – ${formatDate(job.endDate)}` : ""}</div><div class="job-right">${statusPill(job.status)}<div class="progress-wrap"><div class="progress-label"><span>Progress</span><span>${job.progress}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, Number(job.progress) || 0))}%"></div></div></div></div></div>`;
+    return `<div class="job-card"><div class="job-symbol">⌖</div><div class="job-info"><strong>${escapeHtml(job.name)}</strong><p>${escapeHtml(job.client)} · ${escapeHtml(job.location)}${job.companyName ? ` · ${escapeHtml(job.companyName)}` : ""} · Foreman: ${escapeHtml(jobForemanName(job) || "Unassigned")}${assignedCrew.length ? ` · Crew: ${assignedCrew.map(escapeHtml).join(", ")}` : ""}</p>${scopeDetails}${dailyPlanDetails}<div class="job-card-actions"><button class="button button-outline scope-edit-button" data-scope-job="${escapeHtml(job.id)}">${hasScope ? "Edit scope of work" : "Create scope of work"}</button><button class="button button-outline" data-action="assign-foreman" data-job-id="${escapeHtml(job.id)}">${job.foremanUserId ? "Reassign foreman" : "Assign foreman"}</button><button class="button button-primary" data-action="open-gps-workspace" data-job-id="${escapeHtml(job.id)}">GPS workspace</button></div></div><div class="job-meta">${formatDate(job.startDate || job.date)}${job.endDate && job.endDate !== (job.startDate || job.date) ? ` – ${formatDate(job.endDate)}` : ""}</div><div class="job-right">${statusPill(job.status)}${renderJobSafetySummary(job)}<div class="progress-wrap"><div class="progress-label"><span>Progress</span><span>${job.progress}%</span></div><div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, Math.max(0, Number(job.progress) || 0))}%"></div></div></div></div></div>`;
   }).join("")}</div>`;
 }
 
@@ -4901,6 +5094,21 @@ async function logout() {
 }
 
 document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-workspace-reload]")) { void loadPersonalWorkspaces(); return; }
+  if (event.target.closest("[data-workspace-new]")) { personalWorkspaceData.selectedId = ""; renderPage(); return; }
+  if (event.target.closest("[data-workspace-module-cancel]")) { personalWorkspaceData.editModuleId = ""; renderPage(); return; }
+  const editWorkspaceModule = event.target.closest("[data-workspace-module-edit]");
+  if (editWorkspaceModule) {
+    const item = personalWorkspaceData.modules.find((module) => module.id === editWorkspaceModule.dataset.workspaceModuleEdit);
+    if (!item || (item.created_by !== authSession?.user?.id && userProfile?.role !== "admin")) { showToast("You cannot edit this module."); return; }
+    personalWorkspaceData.editModuleId = item.id;
+    renderPage();
+    return;
+  }
+  const deleteWorkspace = event.target.closest("[data-workspace-delete]");
+  if (deleteWorkspace) { void deletePersonalWorkspaceItem("personal_workspaces", deleteWorkspace.dataset.workspaceDelete); return; }
+  const deleteWorkspaceModule = event.target.closest("[data-workspace-module-delete]");
+  if (deleteWorkspaceModule) { void deletePersonalWorkspaceItem("shared_workspace_modules", deleteWorkspaceModule.dataset.workspaceModuleDelete); return; }
   const safetyLibraryFolder = event.target.closest("[data-safety-library-folder]");
   if (safetyLibraryFolder) {
     if (safetyLibraryFolder.classList.contains("safety-library-folder-card")) {
@@ -5328,6 +5536,11 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.id === "personal-workspace-select") {
+    personalWorkspaceData.selectedId = event.target.value;
+    renderPage();
+    return;
+  }
   const safetyLibraryJob = event.target.closest("[data-safety-library-job]");
   if (safetyLibraryJob) {
     updateSafetyLibraryDocumentJob(safetyLibraryJob.dataset.safetyLibraryJob, safetyLibraryJob.value);
@@ -5422,6 +5635,16 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("submit", (event) => {
+  if (event.target.id === "personal-workspace-form") {
+    event.preventDefault();
+    void savePersonalWorkspace(event.target);
+    return;
+  }
+  if (event.target.id === "shared-module-form") {
+    event.preventDefault();
+    void saveSharedWorkspaceModule(event.target);
+    return;
+  }
   if (event.target.id === "safety-library-upload-form") {
     event.preventDefault();
     void uploadSafetyLibraryDocument(event.target);

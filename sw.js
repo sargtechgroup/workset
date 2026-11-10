@@ -1,5 +1,5 @@
-const CACHE_NAME = "fieldwork-shell-v56";
-const APP_SHELL = ["./", "./index.html", "./styles.css?v=43", "./gps-calculations.js", "./gps-workspace.js", "./app.js", "./supabase-config.js", "./manifest.json", "./icon.svg"];
+const CACHE_NAME = "fieldwork-shell-v58";
+const APP_SHELL = ["./", "./index.html", "./styles.css?v=45", "./gps-calculations.js", "./gps-workspace.js", "./app.js", "./supabase-config.js", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
